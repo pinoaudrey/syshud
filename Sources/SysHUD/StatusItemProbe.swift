@@ -16,6 +16,11 @@ import CoreGraphics
 /// `NSStatusBarWindow` reports the label's true rendered width via ordinary
 /// AppKit (no CG access needed), and the CG window list rows carry that same
 /// width. Matching on it needs no name and no ownership check.
+///
+/// Known limitation: another item whose window width matches ours and is
+/// onscreen masks our hidden state, leaving the label full (the pre-feature
+/// status quo). Accepted; disambiguating would need `kCGWindowName` and
+/// therefore Screen Recording access.
 enum StatusItemProbe {
     /// Returns nil when the current label's window can't be located yet
     /// (e.g. still laying out right after launch), in which case the caller

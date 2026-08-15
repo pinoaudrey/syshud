@@ -46,6 +46,14 @@ final class AutoCompactTests: XCTestCase {
         XCTAssertEqual(machine.phase, .full)
     }
 
+    func testBeginRetryIsNoOpWhenAlreadyRetrying() {
+        var machine = AutoCompactMachine()
+        machine.recordProbe(hidden: true)
+        machine.beginRetry()
+        machine.beginRetry()
+        XCTAssertEqual(machine.phase, .retrying, "timer and topology-change triggers may overlap; the second must not disturb the retry in flight")
+    }
+
     func testRetryingHiddenReCompacts() {
         var machine = AutoCompactMachine()
         machine.recordProbe(hidden: true)
