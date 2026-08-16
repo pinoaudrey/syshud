@@ -16,13 +16,13 @@ evidence in the project state dir:
   option-click sends SIGKILL (proven via untrappable death).
 - Launch-at-login toggle: both directions, from the installed bundle.
 - `swift run SysHUD --sample` prints real headless output.
-- Auto-compact on overflow: built and live-verified, open as draft PR #1
-  (branch `auto-compact-label`); merge pending.
+- Auto-compact on overflow: built, live-verified, merged (PR #1, merge
+  commit f2966ff).
 
 ## Machine state right now
 
 - Installed to `/Applications/SysHUD.app`, running from there (built from
-  the `auto-compact-label` branch, 82155c3).
+  merged main, f2966ff).
 - Launch at login: ON. The BTM record is keyed by bundle id and self-heals
   its URL to the running bundle's path.
 - `compactLabel = 0`; auto-compact handles overflow.
@@ -101,9 +101,7 @@ visual check of the menu bar. No lint config in this repo.
 
 ## Next steps (none blocking)
 
-1. Merge PR #1 (auto-compact), Audrey's call, then rebuild and reinstall
-   from main.
-2. Other Macs: clone, `./make-app.sh` (ad-hoc signed, right-click Open on
+1. Other Macs: clone, `./make-app.sh` (ad-hoc signed, right-click Open on
    first launch). Decide whether a small brew tap is worth it.
-3. Possible follow-ups: a color-based hot indicator (fixes the hot-emoji
+2. Possible follow-ups: a color-based hot indicator (fixes the hot-emoji
    overflow limitation above), per-core breakdown, network/disk meters.
