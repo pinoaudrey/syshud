@@ -1,35 +1,38 @@
 # SysHUD handoff
 
-2026-08-06. v1 shipped, pushed to pinoaudrey/syshud (root commit 32bbac9).
+2026-08-06: v1 shipped, pushed to pinoaudrey/syshud (root commit 32bbac9).
+2026-08-16: the syshud-v2 run closed every v1 verification gap and built
+auto-compact (PR #1). Full evidence: `~/agent-projects/syshud-v2/`.
 
 ## State
 
-Working and verified on the MacBook Air (macOS 26, Swift 6.3):
+Verified end to end on the MacBook Air (macOS 26, Swift 6.3), with
+evidence in the project state dir:
 
-- Menu bar item shows live "CPU% MEM" every 2s, verified visually (label
-  ticked 18% to 21% across screenshots).
-- 14/14 unit tests green across 4 consecutive runs.
-- `swift run SysHUD --sample` prints real headless output (system + top 12
-  processes).
-- App bundles and launches via `./make-app.sh && open build/SysHUD.app`.
-
-Not verified end to end: the kill button (needs a real click; the path is a
-single `kill(2)` syscall) and the dropdown panel beyond the Quit button
-(Audrey used Quit, so the panel opens and renders). Launch-at-login toggle
-untested; it requires running from a real .app bundle.
+- Menu bar item shows live "CPU% MEM" every 2s.
+- Dropdown panel: process rows, CPU/Memory sort toggle, compact-label
+  toggle, Quit — all exercised with real clicks.
+- Kill button: plain click sends SIGTERM (proven via a trap log),
+  option-click sends SIGKILL (proven via untrappable death).
+- Launch-at-login toggle: both directions, from the installed bundle.
+- `swift run SysHUD --sample` prints real headless output.
+- Auto-compact on overflow: built and live-verified, open as draft PR #1
+  (branch `auto-compact-label`); merge pending.
 
 ## Machine state right now
 
-- App running from `build/SysHUD.app` (not installed to /Applications).
-- Launch at login: off.
+- Installed to `/Applications/SysHUD.app`, running from there (built from
+  the `auto-compact-label` branch, 82155c3).
+- Launch at login: ON. The BTM record is keyed by bundle id and self-heals
+  its URL to the running bundle's path.
+- `compactLabel = 0`; auto-compact handles overflow.
 - A position default is written on this Mac:
-  `defaults write com.audreypino.syshud "NSStatusItem Preferred Position Item-0" -float 560`.
-  Without it, new status items queue leftmost and get overflow-hidden behind
-  Notion Calendar's 243pt item. Cmd-dragging the item overwrites this default.
-- Trade-off left open: the bar's usable width right of the notch is 617pt.
-  Full label + Agent HUD meters + remaining icons is ~632pt, so the Agent HUD
-  meters are currently overflow-hidden. "Compact label" in the dropdown
-  (CPU-only, ~40pt) frees enough to restore them. Audrey's call.
+  `NSStatusItem Preferred Position Item-0` (currently 447; a Cmd-drag
+  overwrites it). Without it, new status items queue leftmost and get
+  overflow-hidden.
+- Known limitation: under sustained high CPU the 🔥 emoji widens even the
+  compact label to 66-74pt and the item can overflow-hide. Auto-compact
+  cannot help; a color-based hot indicator would fit. Unticketed.
 
 ## Architecture
 
@@ -67,6 +70,28 @@ visual check of the menu bar. No lint config in this repo.
   the way to inspect visibility (`onscreen` flag) without accessibility
   permission. `isVisible` on NSStatusItem lies (reports true when
   overflow-hidden).
+- Refinement of the above, critical for any visibility probe: the
+  bundle-named layer-25 window is a PROXY that reads onscreen=false at X=0
+  even when the item is visible. Judge visibility from the paired
+  anonymous `Item-0` window (adjacent window id, matching width); click at
+  its coordinates. Its width tracks the live label.
+- Label width bands (do not read a width change as a state change): plain
+  compact 44-49pt, hot compact ("🔥96%") 66-68pt, hot compact 3-digit
+  74pt, plain full 75pt, hot full ~95pt. Hot compact overlaps plain full,
+  so width alone cannot tell compact from full; capture the window image
+  to check content.
+- CGWindowList emits single-sample absurd-X glitches (e.g. -2091), always
+  bracketed by normal reads. Ignore singletons.
+- The panel's Quit button and checkbox AX titles are `missing value`;
+  automation targets by index + AX position, not title.
+- Stale `.build` after a repo move: ModuleCache pcms pin the old absolute
+  path and `make-app.sh` fails with "precompiled file ... was compiled
+  with module cache path". Fix: `rm -rf .build`.
+- `sfltool dumpbtm` hangs indefinitely as non-root on this machine
+  (TCC-protected BTM store). Use the unified log for
+  `backgroundtaskmanagementd` instead, via absolute path `/usr/bin/log`
+  (a zsh function named `log` shadows it). The daemon logs identifier,
+  URL, and disposition per register/unregister event.
 - Notch boundary on this 1470pt Air measured at x≈855, so usable status
   width is ~617pt.
 - Asserting live system counters in one short window is flaky (kernel tick
@@ -76,8 +101,9 @@ visual check of the menu bar. No lint config in this repo.
 
 ## Next steps (none blocking)
 
-1. `cp -R build/SysHUD.app /Applications/` and enable launch at login.
+1. Merge PR #1 (auto-compact), Audrey's call, then rebuild and reinstall
+   from main.
 2. Other Macs: clone, `./make-app.sh` (ad-hoc signed, right-click Open on
    first launch). Decide whether a small brew tap is worth it.
-3. Possible v2: auto-compact label when overflow is detected (CGWindowList
-   self-check), per-core breakdown, network/disk meters.
+3. Possible follow-ups: a color-based hot indicator (fixes the hot-emoji
+   overflow limitation above), per-core breakdown, network/disk meters.
