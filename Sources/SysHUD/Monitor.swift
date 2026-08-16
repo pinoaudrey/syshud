@@ -118,6 +118,6 @@ final class Monitor: ObservableObject {
 
     private func retryFullLabel() {
         guard !compactLabel else { return }
-        autoCompact.beginRetry()
+        autoCompact.beginRetry(at: Date())
     }
 }

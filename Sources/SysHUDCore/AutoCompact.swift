@@ -21,7 +21,13 @@ public enum AutoCompactPhase: Equatable, Sendable {
 }
 
 public struct AutoCompactMachine: Equatable, Sendable {
+    /// Screen-parameter-change notifications fire on far more than real
+    /// display topology changes (menu bar composition, spaces, wallpaper),
+    /// so retry attempts are throttled to this cadence regardless of trigger.
+    public static let retryCooldown: TimeInterval = 60
+
     public private(set) var phase: AutoCompactPhase = .full
+    private var lastRetryAttempt: Date?
 
     public init() {}
 
@@ -44,10 +50,15 @@ public struct AutoCompactMachine: Equatable, Sendable {
         }
     }
 
-    /// A retry trigger fired: switch back to full and let the next probe
-    /// settle whether it fits. No-op unless currently compacted.
-    public mutating func beginRetry() {
+    /// A retry trigger fired at `now`: switch back to full and let the next
+    /// probe settle whether it fits. No-op unless currently compacted, and
+    /// rate-limited to `retryCooldown` since the last retry attempt (whether
+    /// or not it ended up expanding) so a notification storm can't flap the
+    /// label faster than that. The caller supplies the clock; this stays pure.
+    public mutating func beginRetry(at now: Date) {
         guard phase == .compact else { return }
+        if let last = lastRetryAttempt, now.timeIntervalSince(last) < Self.retryCooldown { return }
+        lastRetryAttempt = now
         phase = .retrying
     }
 }
