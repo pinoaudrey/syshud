@@ -55,9 +55,11 @@ final class Monitor: ObservableObject {
     // (CPU only, ~40pt) exists so the item can coexist with wide neighbors,
     // manually or automatically when the full label doesn't fit.
     var menuTitle: String {
-        let cpu = String(format: "%.0f%%", system.cpuPercent)
-        let base = effectiveCompact ? cpu : cpu + " " + ByteFormat.tiny(system.usedMemory)
-        return isHot ? "🔥" + base : base
+        LabelFormat.title(
+            cpuPercent: system.cpuPercent,
+            usedMemory: system.usedMemory,
+            compact: effectiveCompact
+        )
     }
 
     var effectiveCompact: Bool {
@@ -65,7 +67,11 @@ final class Monitor: ObservableObject {
     }
 
     var isHot: Bool {
-        system.cpuPercent > 80 || Double(system.usedMemory) > Double(system.totalMemory) * 0.9
+        LabelFormat.isHot(
+            cpuPercent: system.cpuPercent,
+            usedMemory: system.usedMemory,
+            totalMemory: system.totalMemory
+        )
     }
 
     var memoryFraction: Double {

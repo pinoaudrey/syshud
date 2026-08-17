@@ -22,9 +22,10 @@ struct SysHUDApp: App {
         MenuBarExtra {
             HUDView(monitor: monitor)
         } label: {
-            // Text-only (a Label would render icon-only here, and an SF Symbol
+            // Drawn text, not `Text` (whose color this scene strips) and not
+            // a `Label` (which would render icon-only here, and an SF Symbol
             // icon costs ~30pt of width on an already crowded menu bar).
-            Text(monitor.menuTitle).monospacedDigit()
+            Image(nsImage: MenuBarLabel.image(title: monitor.menuTitle, hot: monitor.isHot))
         }
         .menuBarExtraStyle(.window)
     }
