@@ -21,9 +21,18 @@ final class Monitor: ObservableObject {
     // panel is open (the sole reader). The label goes through `labelModel`.
     private(set) var system = SystemSample()
     private(set) var processes: [ProcessSample] = []
-    var panelVisible = false
+    /// What the panel shows: top groups in a pinned order, so rows don't
+    /// jump between the user's glance and their click on a kill button.
+    /// The pin resets while the panel is closed and on a sort change.
+    private(set) var displayGroups: [AppGroup] = []
+    private var pinnedOrder: [Int32] = []
 
-    @Published var sortByMemory = false
+    @Published var sortByMemory = false {
+        didSet {
+            pinnedOrder = []
+            updateDisplayGroups()
+        }
+    }
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
     @Published var compactLabel = UserDefaults.standard.bool(forKey: "compactLabel") {
         didSet {
@@ -105,10 +114,6 @@ final class Monitor: ObservableObject {
         return Double(system.usedMemory) / Double(system.totalMemory)
     }
 
-    var topGroups: [AppGroup] {
-        Array(AppGrouping.groups(from: processes, sortByMemory: sortByMemory).prefix(10))
-    }
-
     func terminate(pid: Int32) {
         let force = NSEvent.modifierFlags.contains(.option)
         kill(pid, force ? SIGKILL : SIGTERM)
@@ -132,13 +137,31 @@ final class Monitor: ObservableObject {
             guard let self else { return }
             let (system, processes) = self.sampler.sample()
             DispatchQueue.main.async {
-                if self.panelVisible { self.objectWillChange.send() }
+                let panelVisible = self.panelWindowVisible()
+                if panelVisible { self.objectWillChange.send() }
                 self.system = system
                 self.processes = processes
+                if !panelVisible { self.pinnedOrder = [] }
+                self.updateDisplayGroups()
                 self.probeIfNeeded()
                 self.refreshLabel()
             }
         }
+    }
+
+    /// The dropdown's window exists only after the first open and reports
+    /// `isVisible` honestly (unlike NSStatusBarWindow). SwiftUI's
+    /// onAppear/onDisappear don't re-fire per open on a MenuBarExtra window,
+    /// so this is the reliable signal.
+    private func panelWindowVisible() -> Bool {
+        NSApp.windows.contains {
+            $0.isVisible && String(describing: type(of: $0)).hasPrefix("MenuBarExtraWindow")
+        }
+    }
+
+    private func updateDisplayGroups() {
+        let sorted = AppGrouping.groups(from: processes, sortByMemory: sortByMemory)
+        displayGroups = Array(AppGrouping.pinned(sorted, to: &pinnedOrder).prefix(10))
     }
 
     private func refreshLabel() {

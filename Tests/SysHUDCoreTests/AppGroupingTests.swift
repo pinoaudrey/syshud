@@ -82,6 +82,31 @@ final class AppGroupingTests: XCTestCase {
         XCTAssertEqual(AppGrouping.groups(from: samples, sortByMemory: true)[0].members[0].name, "mem-worker")
     }
 
+    func testPinnedKeepsPriorOrderAsValuesShift() {
+        var order: [Int32] = []
+        let first = AppGrouping.groups(from: [
+            proc(pid: 1, name: "a", cpu: 90),
+            proc(pid: 2, name: "b", cpu: 10),
+        ], sortByMemory: false)
+        XCTAssertEqual(AppGrouping.pinned(first, to: &order).map(\.name), ["a", "b"])
+
+        let second = AppGrouping.groups(from: [
+            proc(pid: 1, name: "a", cpu: 5),
+            proc(pid: 2, name: "b", cpu: 80),
+        ], sortByMemory: false)
+        XCTAssertEqual(AppGrouping.pinned(second, to: &order).map(\.name), ["a", "b"], "rows must not jump while pinned")
+    }
+
+    func testPinnedAppendsNewGroupsAndDropsVanished() {
+        var order: [Int32] = [7, 8]
+        let groups = AppGrouping.groups(from: [
+            proc(pid: 9, name: "new", cpu: 99),
+            proc(pid: 8, name: "kept", cpu: 1),
+        ], sortByMemory: false)
+        XCTAssertEqual(AppGrouping.pinned(groups, to: &order).map(\.name), ["kept", "new"])
+        XCTAssertEqual(order, [7, 8, 9], "vanished ids keep their slot for a possible return")
+    }
+
     func testSelfResponsibleProcessIsSoloGroup() {
         let groups = AppGrouping.groups(from: [proc(pid: 1, name: "standalone", cpu: 5)], sortByMemory: false)
 

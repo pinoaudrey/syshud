@@ -42,6 +42,21 @@ public enum AppGrouping {
             : groups.sorted { $0.cpuPercent > $1.cpuPercent }
     }
 
+    /// Reorders `groups` to match `order` so panel rows hold still between
+    /// ticks: ids already in `order` keep their slot, new ids append in
+    /// their sorted rank and join `order`. Vanished ids stay in `order` and
+    /// reclaim their slot if the app returns.
+    public static func pinned(_ groups: [AppGroup], to order: inout [Int32]) -> [AppGroup] {
+        let byId = Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0) })
+        var result = order.compactMap { byId[$0] }
+        let known = Set(order)
+        for group in groups where !known.contains(group.id) {
+            result.append(group)
+            order.append(group.id)
+        }
+        return result
+    }
+
     private static func sorted(_ members: [ProcessSample], byMemory: Bool) -> [ProcessSample] {
         byMemory
             ? members.sorted { $0.memoryBytes > $1.memoryBytes }

@@ -32,7 +32,7 @@ struct HUDView: View {
             .labelsHidden()
 
             VStack(spacing: 5) {
-                ForEach(monitor.topGroups) { group in
+                ForEach(monitor.displayGroups) { group in
                     if group.isSolo {
                         soloRow(group.members[0])
                     } else {
@@ -63,8 +63,6 @@ struct HUDView: View {
         }
         .padding(12)
         .frame(width: 360)
-        .onAppear { monitor.panelVisible = true }
-        .onDisappear { monitor.panelVisible = false }
     }
 
     private var launchAtLoginBinding: Binding<Bool> {
@@ -110,14 +108,29 @@ struct HUDView: View {
 
     private func groupRow(_ group: AppGroup) -> some View {
         HStack(spacing: 8) {
-            chevron(expandedState: expanded.contains(group.id))
-            Text(group.name)
-                .font(.callout)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Text("×\(group.members.count)")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            // A Button, not onTapGesture: the MenuBarExtra panel drops tap
+            // gestures on plain views while buttons receive clicks normally.
+            Button {
+                if expanded.contains(group.id) {
+                    expanded.remove(group.id)
+                } else {
+                    expanded.insert(group.id)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    chevron(expandedState: expanded.contains(group.id))
+                    Text(group.name)
+                        .font(.callout)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text("×\(group.members.count)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(expanded.contains(group.id) ? "Hide processes" : "Show processes")
             Spacer(minLength: 4)
             metrics(cpuPercent: group.cpuPercent, memoryBytes: group.memoryBytes)
             killButton(
@@ -126,14 +139,6 @@ struct HUDView: View {
                 enabled: group.ownedByMe,
                 disabledHelp: "The responsible process is not killable from here"
             )
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if expanded.contains(group.id) {
-                expanded.remove(group.id)
-            } else {
-                expanded.insert(group.id)
-            }
         }
     }
 
