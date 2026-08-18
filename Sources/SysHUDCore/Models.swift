@@ -8,15 +8,26 @@ public struct ProcessSample: Identifiable, Sendable {
     /// Physical footprint in bytes, the same number Activity Monitor's Memory column shows.
     public let memoryBytes: UInt64
     public let ownedByMe: Bool
+    /// The pid macOS holds responsible for this process (Activity Monitor's
+    /// app grouping). Self-responsible processes carry their own pid.
+    public let responsiblePid: Int32
 
     public var id: Int32 { pid }
 
-    public init(pid: Int32, name: String, cpuPercent: Double, memoryBytes: UInt64, ownedByMe: Bool) {
+    public init(
+        pid: Int32,
+        name: String,
+        cpuPercent: Double,
+        memoryBytes: UInt64,
+        ownedByMe: Bool,
+        responsiblePid: Int32
+    ) {
         self.pid = pid
         self.name = name
         self.cpuPercent = cpuPercent
         self.memoryBytes = memoryBytes
         self.ownedByMe = ownedByMe
+        self.responsiblePid = responsiblePid
     }
 }
 

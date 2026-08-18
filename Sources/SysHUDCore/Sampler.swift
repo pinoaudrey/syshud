@@ -1,6 +1,14 @@
 import Darwin
 import Foundation
 
+/// Private but long-stable libSystem SPI, the same responsibility data
+/// Activity Monitor's app grouping uses. No public header; fine for an
+/// ad-hoc-signed personal app, unusable for App Store distribution. If an
+/// OS update ever drops it, the fallback is walking ppid to the nearest
+/// .app ancestor.
+@_silgen_name("responsibility_get_pid_responsible_for_pid")
+private func responsibility_get_pid_responsible_for_pid(_ pid: pid_t) -> pid_t
+
 /// Samples system-wide CPU/memory and per-process CPU/memory.
 /// Stateful: CPU percentages are deltas against the previous call, so the
 /// first sample() reports 0% CPU everywhere. Not thread-safe; call from one queue.
@@ -11,6 +19,7 @@ public final class Sampler {
     private struct ProcIdentity {
         let name: String
         let uid: uid_t?
+        let responsiblePid: Int32
     }
 
     private var prevHostTicks: (busy: UInt64, total: UInt64)?
@@ -56,7 +65,8 @@ public final class Sampler {
             let cached = identityCache[pid]
             let identity = ProcIdentity(
                 name: cached?.name ?? lookupName(pid),
-                uid: cached?.uid ?? uid(of: pid)
+                uid: cached?.uid ?? uid(of: pid),
+                responsiblePid: cached?.responsiblePid ?? responsiblePid(of: pid)
             )
             nextIdentityCache[pid] = identity
             processes.append(ProcessSample(
@@ -64,7 +74,8 @@ public final class Sampler {
                 name: identity.name,
                 cpuPercent: percent,
                 memoryBytes: usage.footprint,
-                ownedByMe: identity.uid == myUID
+                ownedByMe: identity.uid == myUID,
+                responsiblePid: identity.responsiblePid
             ))
         }
         prevProcCPUNs = nextProcCPUNs
@@ -148,6 +159,11 @@ public final class Sampler {
             return String(cString: nameBuf)
         }
         return "pid \(pid)"
+    }
+
+    private func responsiblePid(of pid: Int32) -> Int32 {
+        let rp = responsibility_get_pid_responsible_for_pid(pid)
+        return rp > 0 ? rp : pid
     }
 
     private func uid(of pid: Int32) -> uid_t? {

@@ -105,16 +105,13 @@ final class Monitor: ObservableObject {
         return Double(system.usedMemory) / Double(system.totalMemory)
     }
 
-    var topProcesses: [ProcessSample] {
-        let sorted = sortByMemory
-            ? processes.sorted { $0.memoryBytes > $1.memoryBytes }
-            : processes.sorted { $0.cpuPercent > $1.cpuPercent }
-        return Array(sorted.prefix(10))
+    var topGroups: [AppGroup] {
+        Array(AppGrouping.groups(from: processes, sortByMemory: sortByMemory).prefix(10))
     }
 
-    func terminate(_ process: ProcessSample) {
+    func terminate(pid: Int32) {
         let force = NSEvent.modifierFlags.contains(.option)
-        kill(process.pid, force ? SIGKILL : SIGTERM)
+        kill(pid, force ? SIGKILL : SIGTERM)
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {

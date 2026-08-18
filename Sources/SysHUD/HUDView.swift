@@ -3,6 +3,9 @@ import SysHUDCore
 
 struct HUDView: View {
     @ObservedObject var monitor: Monitor
+    @State private var expanded: Set<Int32> = []
+
+    private static let expandedMemberCap = 8
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -29,8 +32,15 @@ struct HUDView: View {
             .labelsHidden()
 
             VStack(spacing: 5) {
-                ForEach(monitor.topProcesses) { process in
-                    row(process)
+                ForEach(monitor.topGroups) { group in
+                    if group.isSolo {
+                        soloRow(group.members[0])
+                    } else {
+                        groupRow(group)
+                        if expanded.contains(group.id) {
+                            memberRows(group)
+                        }
+                    }
                 }
             }
 
@@ -77,8 +87,9 @@ struct HUDView: View {
         }
     }
 
-    private func row(_ process: ProcessSample) -> some View {
+    private func soloRow(_ process: ProcessSample) -> some View {
         HStack(spacing: 8) {
+            chevron(expandedState: nil)
             Text(process.name)
                 .font(.callout)
                 .lineLimit(1)
@@ -87,24 +98,111 @@ struct HUDView: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
             Spacer(minLength: 4)
-            Text(String(format: "%.1f%%", process.cpuPercent))
+            metrics(cpuPercent: process.cpuPercent, memoryBytes: process.memoryBytes)
+            killButton(
+                pid: process.pid,
+                name: process.name,
+                enabled: process.ownedByMe,
+                disabledHelp: "Owned by another user"
+            )
+        }
+    }
+
+    private func groupRow(_ group: AppGroup) -> some View {
+        HStack(spacing: 8) {
+            chevron(expandedState: expanded.contains(group.id))
+            Text(group.name)
+                .font(.callout)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text("×\(group.members.count)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 4)
+            metrics(cpuPercent: group.cpuPercent, memoryBytes: group.memoryBytes)
+            killButton(
+                pid: group.responsiblePid,
+                name: group.name,
+                enabled: group.ownedByMe,
+                disabledHelp: "The responsible process is not killable from here"
+            )
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if expanded.contains(group.id) {
+                expanded.remove(group.id)
+            } else {
+                expanded.insert(group.id)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func memberRows(_ group: AppGroup) -> some View {
+        ForEach(group.members.prefix(Self.expandedMemberCap)) { member in
+            HStack(spacing: 8) {
+                Text(member.name)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(verbatim: String(member.pid))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer(minLength: 4)
+                Text(String(format: "%.1f%%", member.cpuPercent))
+                    .font(.caption.monospacedDigit())
+                    .frame(width: 56, alignment: .trailing)
+                Text(ByteFormat.short(member.memoryBytes))
+                    .font(.caption.monospacedDigit())
+                    .frame(width: 52, alignment: .trailing)
+                killButton(
+                    pid: member.pid,
+                    name: member.name,
+                    enabled: member.ownedByMe,
+                    disabledHelp: "Owned by another user"
+                )
+            }
+            .padding(.leading, 18)
+        }
+        if group.members.count > Self.expandedMemberCap {
+            Text("and \(group.members.count - Self.expandedMemberCap) more")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 18)
+        }
+    }
+
+    /// Nil renders an invisible chevron so solo rows align with group rows.
+    private func chevron(expandedState: Bool?) -> some View {
+        Image(systemName: expandedState == true ? "chevron.down" : "chevron.right")
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .frame(width: 10)
+            .opacity(expandedState == nil ? 0 : 1)
+    }
+
+    private func metrics(cpuPercent: Double, memoryBytes: UInt64) -> some View {
+        HStack(spacing: 8) {
+            Text(String(format: "%.1f%%", cpuPercent))
                 .font(.callout.monospacedDigit())
                 .frame(width: 56, alignment: .trailing)
-            Text(ByteFormat.short(process.memoryBytes))
+            Text(ByteFormat.short(memoryBytes))
                 .font(.callout.monospacedDigit())
                 .frame(width: 52, alignment: .trailing)
-            Button {
-                monitor.terminate(process)
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-                    .opacity(process.ownedByMe ? 1 : 0.25)
-            }
-            .buttonStyle(.plain)
-            .disabled(!process.ownedByMe)
-            .help(process.ownedByMe
-                ? "Quit \(process.name) (⌥-click to force kill)"
-                : "Owned by another user")
         }
+    }
+
+    private func killButton(pid: Int32, name: String, enabled: Bool, disabledHelp: String) -> some View {
+        Button {
+            monitor.terminate(pid: pid)
+        } label: {
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(.secondary)
+                .opacity(enabled ? 1 : 0.25)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .help(enabled ? "Quit \(name) (⌥-click to force kill)" : disabledHelp)
     }
 }
