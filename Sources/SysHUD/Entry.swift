@@ -22,11 +22,19 @@ struct SysHUDApp: App {
         MenuBarExtra {
             HUDView(monitor: monitor)
         } label: {
-            // Drawn text, not `Text` (whose color this scene strips) and not
-            // a `Label` (which would render icon-only here, and an SF Symbol
-            // icon costs ~30pt of width on an already crowded menu bar).
-            Image(nsImage: MenuBarLabel.image(title: monitor.menuTitle, hot: monitor.isHot))
+            MenuBarLabelView(model: monitor.labelModel)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+struct MenuBarLabelView: View {
+    @ObservedObject var model: LabelModel
+
+    var body: some View {
+        // Drawn text, not `Text` (whose color this scene strips) and not
+        // a `Label` (which would render icon-only here, and an SF Symbol
+        // icon costs ~30pt of width on an already crowded menu bar).
+        Image(nsImage: model.image)
     }
 }

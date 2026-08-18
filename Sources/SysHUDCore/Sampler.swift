@@ -5,10 +5,18 @@ import Foundation
 /// Stateful: CPU percentages are deltas against the previous call, so the
 /// first sample() reports 0% CPU everywhere. Not thread-safe; call from one queue.
 public final class Sampler {
+    /// Facts about a pid that cannot change while it lives, looked up once
+    /// and carried forward. A nil uid means the lookup failed (e.g. a race
+    /// with a process still spawning) and is retried next tick.
+    private struct ProcIdentity {
+        let name: String
+        let uid: uid_t?
+    }
+
     private var prevHostTicks: (busy: UInt64, total: UInt64)?
     private var prevProcCPUNs: [Int32: UInt64] = [:]
     private var prevSampleAt: UInt64 = 0
-    private var nameCache: [Int32: String] = [:]
+    private var identityCache: [Int32: ProcIdentity] = [:]
     private let myUID = getuid()
     private let timebase: mach_timebase_info_data_t = {
         var tb = mach_timebase_info_data_t()
@@ -36,7 +44,7 @@ public final class Sampler {
 
         var processes: [ProcessSample] = []
         var nextProcCPUNs: [Int32: UInt64] = [:]
-        var nextNameCache: [Int32: String] = [:]
+        var nextIdentityCache: [Int32: ProcIdentity] = [:]
         for pid in allPids() {
             guard let usage = rusage(pid) else { continue }
             let cpuNs = machToNs(usage.cpuMach)
@@ -45,18 +53,22 @@ public final class Sampler {
             if wallNsDelta > 0, let prev = prevProcCPUNs[pid], cpuNs >= prev {
                 percent = CPUMath.processPercent(cpuNsDelta: cpuNs - prev, wallNsDelta: wallNsDelta)
             }
-            let name = nameCache[pid] ?? lookupName(pid)
-            nextNameCache[pid] = name
+            let cached = identityCache[pid]
+            let identity = ProcIdentity(
+                name: cached?.name ?? lookupName(pid),
+                uid: cached?.uid ?? uid(of: pid)
+            )
+            nextIdentityCache[pid] = identity
             processes.append(ProcessSample(
                 pid: pid,
-                name: name,
+                name: identity.name,
                 cpuPercent: percent,
                 memoryBytes: usage.footprint,
-                ownedByMe: uid(of: pid) == myUID
+                ownedByMe: identity.uid == myUID
             ))
         }
         prevProcCPUNs = nextProcCPUNs
-        nameCache = nextNameCache
+        identityCache = nextIdentityCache
         prevSampleAt = now
         return (system, processes)
     }

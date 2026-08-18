@@ -22,11 +22,18 @@ import CoreGraphics
 /// status quo). Accepted; disambiguating would need `kCGWindowName` and
 /// therefore Screen Recording access.
 enum StatusItemProbe {
-    /// Returns nil when the current label's window can't be located yet
-    /// (e.g. still laying out right after launch), in which case the caller
-    /// should skip this probe rather than guess.
-    static func isHidden() -> Bool? {
-        guard let width = ourLabelWidth() else { return nil }
+    /// The label's rendered width, read cheaply from our own window without
+    /// touching CGWindowList. Nil when the window can't be located yet
+    /// (e.g. still laying out right after launch). Exposed separately so the
+    /// caller can rate-limit the expensive probe on it.
+    static func labelWidth() -> CGFloat? {
+        ourLabelWidth()
+    }
+
+    /// Returns nil when the window list doesn't contain a candidate for
+    /// `width` yet, in which case the caller should skip this probe rather
+    /// than guess.
+    static func isHidden(width: CGFloat) -> Bool? {
         guard let rows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] else {
             return nil
         }

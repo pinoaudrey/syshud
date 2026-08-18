@@ -53,6 +53,8 @@ struct HUDView: View {
         }
         .padding(12)
         .frame(width: 360)
+        .onAppear { monitor.panelVisible = true }
+        .onDisappear { monitor.panelVisible = false }
     }
 
     private var launchAtLoginBinding: Binding<Bool> {

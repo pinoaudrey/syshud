@@ -4,9 +4,25 @@ import Foundation
 import ServiceManagement
 import SysHUDCore
 
+/// The menu bar label's only observable state. Separate from Monitor so a
+/// label update re-renders just the label view, and Monitor's per-tick data
+/// can stay unpublished while the panel is closed.
+final class LabelModel: ObservableObject {
+    @Published var image = MenuBarLabel.image(
+        title: LabelFormat.title(cpuPercent: 0, usedMemory: 0, compact: false),
+        hot: false
+    )
+}
+
 final class Monitor: ObservableObject {
-    @Published var system = SystemSample()
-    @Published var processes: [ProcessSample] = []
+    let labelModel = LabelModel()
+
+    // Ticks mutate these silently; `objectWillChange` fires only while the
+    // panel is open (the sole reader). The label goes through `labelModel`.
+    private(set) var system = SystemSample()
+    private(set) var processes: [ProcessSample] = []
+    var panelVisible = false
+
     @Published var sortByMemory = false
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
     @Published var compactLabel = UserDefaults.standard.bool(forKey: "compactLabel") {
@@ -15,9 +31,19 @@ final class Monitor: ObservableObject {
             // Manual always wins; starting the auto machine fresh means it
             // re-probes from scratch if the user ever turns manual back off.
             if compactLabel { autoCompact = AutoCompactMachine() }
+            probeGate = ProbeGate()
+            refreshLabel()
         }
     }
-    @Published private var autoCompact = AutoCompactMachine()
+    private var autoCompact = AutoCompactMachine()
+    private var probeGate = ProbeGate()
+
+    private struct LabelState: Equatable {
+        let title: String
+        let hot: Bool
+    }
+
+    private var lastLabel: LabelState?
 
     private let sampler = Sampler()
     private let queue = DispatchQueue(label: "syshud.sampler", qos: .utility)
@@ -109,21 +135,37 @@ final class Monitor: ObservableObject {
             guard let self else { return }
             let (system, processes) = self.sampler.sample()
             DispatchQueue.main.async {
+                if self.panelVisible { self.objectWillChange.send() }
                 self.system = system
                 self.processes = processes
                 self.probeIfNeeded()
+                self.refreshLabel()
             }
         }
     }
 
+    private func refreshLabel() {
+        let state = LabelState(title: menuTitle, hot: isHot)
+        guard state != lastLabel else { return }
+        lastLabel = state
+        labelModel.image = MenuBarLabel.image(title: state.title, hot: state.hot)
+    }
+
     private func probeIfNeeded() {
         guard !compactLabel, autoCompact.needsProbe else { return }
-        guard let hidden = StatusItemProbe.isHidden() else { return }
+        guard let width = StatusItemProbe.labelWidth() else { return }
+        let retrying = autoCompact.phase == .retrying
+        guard probeGate.shouldProbe(width: Double(width), retrying: retrying, now: Date()) else { return }
+        guard let hidden = StatusItemProbe.isHidden(width: width) else {
+            probeGate.probeFailed()
+            return
+        }
         autoCompact.recordProbe(hidden: hidden)
     }
 
     private func retryFullLabel() {
         guard !compactLabel else { return }
         autoCompact.beginRetry(at: Date())
+        refreshLabel()
     }
 }
