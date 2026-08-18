@@ -1,14 +1,31 @@
 import Darwin
 import Foundation
 
+/// Private but long-stable libSystem SPI, the same responsibility data
+/// Activity Monitor's app grouping uses. No public header; fine for an
+/// ad-hoc-signed personal app, unusable for App Store distribution. If an
+/// OS update ever drops it, the fallback is walking ppid to the nearest
+/// .app ancestor.
+@_silgen_name("responsibility_get_pid_responsible_for_pid")
+private func responsibility_get_pid_responsible_for_pid(_ pid: pid_t) -> pid_t
+
 /// Samples system-wide CPU/memory and per-process CPU/memory.
 /// Stateful: CPU percentages are deltas against the previous call, so the
 /// first sample() reports 0% CPU everywhere. Not thread-safe; call from one queue.
 public final class Sampler {
+    /// Facts about a pid that cannot change while it lives, looked up once
+    /// and carried forward. A nil uid means the lookup failed (e.g. a race
+    /// with a process still spawning) and is retried next tick.
+    private struct ProcIdentity {
+        let name: String
+        let uid: uid_t?
+        let responsiblePid: Int32
+    }
+
     private var prevHostTicks: (busy: UInt64, total: UInt64)?
     private var prevProcCPUNs: [Int32: UInt64] = [:]
     private var prevSampleAt: UInt64 = 0
-    private var nameCache: [Int32: String] = [:]
+    private var identityCache: [Int32: ProcIdentity] = [:]
     private let myUID = getuid()
     private let timebase: mach_timebase_info_data_t = {
         var tb = mach_timebase_info_data_t()
@@ -36,7 +53,7 @@ public final class Sampler {
 
         var processes: [ProcessSample] = []
         var nextProcCPUNs: [Int32: UInt64] = [:]
-        var nextNameCache: [Int32: String] = [:]
+        var nextIdentityCache: [Int32: ProcIdentity] = [:]
         for pid in allPids() {
             guard let usage = rusage(pid) else { continue }
             let cpuNs = machToNs(usage.cpuMach)
@@ -45,18 +62,24 @@ public final class Sampler {
             if wallNsDelta > 0, let prev = prevProcCPUNs[pid], cpuNs >= prev {
                 percent = CPUMath.processPercent(cpuNsDelta: cpuNs - prev, wallNsDelta: wallNsDelta)
             }
-            let name = nameCache[pid] ?? lookupName(pid)
-            nextNameCache[pid] = name
+            let cached = identityCache[pid]
+            let identity = ProcIdentity(
+                name: cached?.name ?? lookupName(pid),
+                uid: cached?.uid ?? uid(of: pid),
+                responsiblePid: cached?.responsiblePid ?? responsiblePid(of: pid)
+            )
+            nextIdentityCache[pid] = identity
             processes.append(ProcessSample(
                 pid: pid,
-                name: name,
+                name: identity.name,
                 cpuPercent: percent,
                 memoryBytes: usage.footprint,
-                ownedByMe: uid(of: pid) == myUID
+                ownedByMe: identity.uid == myUID,
+                responsiblePid: identity.responsiblePid
             ))
         }
         prevProcCPUNs = nextProcCPUNs
-        nameCache = nextNameCache
+        identityCache = nextIdentityCache
         prevSampleAt = now
         return (system, processes)
     }
@@ -136,6 +159,11 @@ public final class Sampler {
             return String(cString: nameBuf)
         }
         return "pid \(pid)"
+    }
+
+    private func responsiblePid(of pid: Int32) -> Int32 {
+        let rp = responsibility_get_pid_responsible_for_pid(pid)
+        return rp > 0 ? rp : pid
     }
 
     private func uid(of pid: Int32) -> uid_t? {

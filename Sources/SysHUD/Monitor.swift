@@ -4,10 +4,35 @@ import Foundation
 import ServiceManagement
 import SysHUDCore
 
+/// The menu bar label's only observable state. Separate from Monitor so a
+/// label update re-renders just the label view, and Monitor's per-tick data
+/// can stay unpublished while the panel is closed.
+final class LabelModel: ObservableObject {
+    @Published var image = MenuBarLabel.image(
+        title: LabelFormat.title(cpuPercent: 0, usedMemory: 0, compact: false),
+        hot: false
+    )
+}
+
 final class Monitor: ObservableObject {
-    @Published var system = SystemSample()
-    @Published var processes: [ProcessSample] = []
-    @Published var sortByMemory = false
+    let labelModel = LabelModel()
+
+    // Ticks mutate these silently; `objectWillChange` fires only while the
+    // panel is open (the sole reader). The label goes through `labelModel`.
+    private(set) var system = SystemSample()
+    private(set) var processes: [ProcessSample] = []
+    /// What the panel shows: top groups in a pinned order, so rows don't
+    /// jump between the user's glance and their click on a kill button.
+    /// The pin resets while the panel is closed and on a sort change.
+    private(set) var displayGroups: [AppGroup] = []
+    private var pinnedOrder: [Int32] = []
+
+    @Published var sortByMemory = false {
+        didSet {
+            pinnedOrder = []
+            updateDisplayGroups()
+        }
+    }
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
     @Published var compactLabel = UserDefaults.standard.bool(forKey: "compactLabel") {
         didSet {
@@ -15,9 +40,19 @@ final class Monitor: ObservableObject {
             // Manual always wins; starting the auto machine fresh means it
             // re-probes from scratch if the user ever turns manual back off.
             if compactLabel { autoCompact = AutoCompactMachine() }
+            probeGate = ProbeGate()
+            refreshLabel()
         }
     }
-    @Published private var autoCompact = AutoCompactMachine()
+    private var autoCompact = AutoCompactMachine()
+    private var probeGate = ProbeGate()
+
+    private struct LabelState: Equatable {
+        let title: String
+        let hot: Bool
+    }
+
+    private var lastLabel: LabelState?
 
     private let sampler = Sampler()
     private let queue = DispatchQueue(label: "syshud.sampler", qos: .utility)
@@ -79,16 +114,9 @@ final class Monitor: ObservableObject {
         return Double(system.usedMemory) / Double(system.totalMemory)
     }
 
-    var topProcesses: [ProcessSample] {
-        let sorted = sortByMemory
-            ? processes.sorted { $0.memoryBytes > $1.memoryBytes }
-            : processes.sorted { $0.cpuPercent > $1.cpuPercent }
-        return Array(sorted.prefix(10))
-    }
-
-    func terminate(_ process: ProcessSample) {
+    func terminate(pid: Int32) {
         let force = NSEvent.modifierFlags.contains(.option)
-        kill(process.pid, force ? SIGKILL : SIGTERM)
+        kill(pid, force ? SIGKILL : SIGTERM)
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -109,21 +137,55 @@ final class Monitor: ObservableObject {
             guard let self else { return }
             let (system, processes) = self.sampler.sample()
             DispatchQueue.main.async {
+                let panelVisible = self.panelWindowVisible()
+                if panelVisible { self.objectWillChange.send() }
                 self.system = system
                 self.processes = processes
+                if !panelVisible { self.pinnedOrder = [] }
+                self.updateDisplayGroups()
                 self.probeIfNeeded()
+                self.refreshLabel()
             }
         }
     }
 
+    /// The dropdown's window exists only after the first open and reports
+    /// `isVisible` honestly (unlike NSStatusBarWindow). SwiftUI's
+    /// onAppear/onDisappear don't re-fire per open on a MenuBarExtra window,
+    /// so this is the reliable signal.
+    private func panelWindowVisible() -> Bool {
+        NSApp.windows.contains {
+            $0.isVisible && String(describing: type(of: $0)).hasPrefix("MenuBarExtraWindow")
+        }
+    }
+
+    private func updateDisplayGroups() {
+        let sorted = AppGrouping.groups(from: processes, sortByMemory: sortByMemory)
+        displayGroups = Array(AppGrouping.pinned(sorted, to: &pinnedOrder).prefix(10))
+    }
+
+    private func refreshLabel() {
+        let state = LabelState(title: menuTitle, hot: isHot)
+        guard state != lastLabel else { return }
+        lastLabel = state
+        labelModel.image = MenuBarLabel.image(title: state.title, hot: state.hot)
+    }
+
     private func probeIfNeeded() {
         guard !compactLabel, autoCompact.needsProbe else { return }
-        guard let hidden = StatusItemProbe.isHidden() else { return }
+        guard let width = StatusItemProbe.labelWidth() else { return }
+        let retrying = autoCompact.phase == .retrying
+        guard probeGate.shouldProbe(width: Double(width), retrying: retrying, now: Date()) else { return }
+        guard let hidden = StatusItemProbe.isHidden(width: width) else {
+            probeGate.probeFailed()
+            return
+        }
         autoCompact.recordProbe(hidden: hidden)
     }
 
     private func retryFullLabel() {
         guard !compactLabel else { return }
         autoCompact.beginRetry(at: Date())
+        refreshLabel()
     }
 }

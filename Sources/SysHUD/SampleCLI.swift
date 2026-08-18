@@ -24,6 +24,13 @@ enum SampleCLI {
             print("\(pad(String(p.pid), 7))  \(pad(cpu, 6))  \(pad(ByteFormat.short(p.memoryBytes), 7))  \(p.name)")
         }
         print("")
+        print("\(pad("RPID", 7))  \(pad("CPU%", 6))  \(pad("MEM", 7))  \(pad("PROCS", 5))  APP")
+        let groups = AppGrouping.groups(from: processes, sortByMemory: false).prefix(8)
+        for g in groups {
+            let cpu = String(format: "%.1f", g.cpuPercent)
+            print("\(pad(String(g.responsiblePid), 7))  \(pad(cpu, 6))  \(pad(ByteFormat.short(g.memoryBytes), 7))  \(pad(String(g.members.count), 5))  \(g.name)")
+        }
+        print("")
         print("\(processes.count) processes sampled")
     }
 
